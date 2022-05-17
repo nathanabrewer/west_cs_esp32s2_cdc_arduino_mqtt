@@ -5,26 +5,19 @@
  * Serial1 - can be used to control GPS or any other device, may be replaced with Serial
  */
 #include "cdcusb.h"
-#include <WiFi.h>
+#include <WiFiClientSecure.h>
 #include <PubSubClient.h>
+#include "cert.h";
 
 
 CDCusb USBSerial;
 
-// WiFi
-const char *ssid = "BREWERSYSTEMS"; // Enter your WiFi name
-const char *password = "9703125641";  // Enter WiFi password
-
-// MQTT Broker
-const char *mqtt_broker = "mqtt.brewersystems.com";
-const char *topic = "qr/out";
-const char *mqtt_username = "nathan";
-const char *mqtt_password = "Free113178!";
-const int mqtt_port = 1883;
-
-WiFiClient espClient;
+WiFiClientSecure espClient;
 PubSubClient client(espClient);
 
+char *inputTopic;
+char *outputTopic;
+const char *topic = "qr/out";
 
 class MyUSBCallbacks : public CDCCallbacks {
     void onCodingChange(cdc_line_coding_t const* p_line_coding)
@@ -94,6 +87,11 @@ void setup()
       delay(500);
       Serial.println("Connecting to WiFi..");
   }
+
+    espClient.setCACert(cert_ca);
+  espClient.setCertificate(cert_crt); // for client verification
+  espClient.setPrivateKey(cert_key);  // for client verification
+  
   client.setServer(mqtt_broker, mqtt_port);
   client.setCallback(callback);
   while (!client.connected()) {
