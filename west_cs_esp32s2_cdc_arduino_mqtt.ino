@@ -19,8 +19,9 @@
 #include "cdcusb.h"
 #include <WiFiClientSecure.h>
 #include <PubSubClient.h>
-#include "cert.h";
 
+#include "cert.h"
+#include <ArduinoJson.h>
 
 CDCusb USBSerial;
 
@@ -89,6 +90,7 @@ void setup()
   
   client.setServer(mqtt_broker, mqtt_port);
   client.setCallback(callback);
+  client.setBufferSize(1024);
   while (!client.connected()) {
       String client_id = "esp32-client-";
       client_id += String(WiFi.macAddress());
@@ -125,15 +127,40 @@ void startUsbSerialHost(char* SerialNumber, char* Manufacturer, char* Product, u
 
 void callback(char *topic, byte *payload, unsigned int length) {
   
-  if (strcmp(topic, inputTopic.c_str()) == 0){
-    Serial.print("INPUT TOPIC CONTENT:");
-    for (int i = 0; i < length; i++) {
-        Serial.print((char) payload[i]);
-    }
-    Serial.println();
+  StaticJsonDocument<1024> doc;
+  DeserializationError error = deserializeJson(doc, payload);
+  if (error) {
+    Serial.print(F("deserializeJson() failed: "));
+    Serial.println(error.f_str());
+    return;
   }
   
+  if (doc.containsKey("code")) {
+    String code = String( doc["code"].as<char*>() );
+
+    Serial.println(code);
+    USBSerial.write((byte*) code.c_str(), code.length());
+    Serial.printf("USBSerial wrote %d bytes. (json['code'])");
+    Serial.println("");
+    
+    
+    const uint8_t feed[2] = {0x0D, 0x0A};
+    USBSerial.write(feed, 2);  
+    Serial.println("USBSerial wrote 2 bytes. (appending LF CR)");
+    //infoAlert how many bytes i wrote? 
+  }
+  
+  //const char* sensor = doc["sensor"];
+  //Serial.println(sensor);
+  
+  if (strcmp(topic, inputTopic.c_str()) == 0){
+    //Serial.print("INPUT TOPIC CONTENT:");
+  }
+
+  
   if (strcmp(topic, outputTopic.c_str()) == 0){
+    /*
+     * 
     Serial.print("OUTPUT TOPIC CONTENT:");
     for (int i = 0; i < length; i++) {
         Serial.print((char) payload[i]);
@@ -141,7 +168,8 @@ void callback(char *topic, byte *payload, unsigned int length) {
     Serial.println();
     int a = USBSerial.write(payload, length);
     const uint8_t feed[2] = {0x0D, 0x0A};
-    USBSerial.write(feed, 2);    
+    USBSerial.write(feed, 2);   
+    */ 
   }
 
 }
@@ -162,6 +190,7 @@ void relaySerialToUsb(){
         Serial1.write((uint8_t*)buf1, len);
     }
 }
+
 void relaySerial1ToUsb(){
     while(Serial1.available())
     {
