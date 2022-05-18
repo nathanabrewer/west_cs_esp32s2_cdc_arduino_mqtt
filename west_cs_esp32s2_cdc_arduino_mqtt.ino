@@ -15,9 +15,12 @@ CDCusb USBSerial;
 WiFiClientSecure espClient;
 PubSubClient client(espClient);
 
-char *inputTopic;
-char *outputTopic;
-const char *topic = "qr/out";
+
+String outputTopic = "";
+String inputTopic= ""; 
+String infoTopic="";
+String macAddress ="";
+
 
 class MyUSBCallbacks : public CDCCallbacks {
     void onCodingChange(cdc_line_coding_t const* p_line_coding)
@@ -52,7 +55,11 @@ void setup()
 {
     Serial.begin(115200);
     Serial1.begin(115200);
-    
+  macAddress = String(WiFi.macAddress());
+  //macAddress.replace(":", "");
+  outputTopic = "west-cs/"+macAddress+"/out";
+  inputTopic = "west-cs/"+macAddress+"/in";
+  infoTopic = "west-cs/"+macAddress+"/info";
     USBSerial.setCallbacks(new MyUSBCallbacks());
     USBSerial.setWantedChar('x');
 /*
@@ -88,7 +95,7 @@ void setup()
       Serial.println("Connecting to WiFi..");
   }
 
-    espClient.setCACert(cert_ca);
+  espClient.setCACert(cert_ca);
   espClient.setCertificate(cert_crt); // for client verification
   espClient.setPrivateKey(cert_key);  // for client verification
   
@@ -106,10 +113,13 @@ void setup()
           delay(2000);
       }
   } 
-  
-  // publish and subscribe
-  client.publish(topic, "Hi I'm ESP32 ^^");
-  client.subscribe(topic);   
+
+  infoAlert("ONLINE");
+  client.subscribe(infoTopic.c_str());   
+}
+
+void infoAlert(String d){
+  client.publish(outputTopic.c_str(), d.c_str());
 }
 
 void callback(char *topic, byte *payload, unsigned int length) {
@@ -129,6 +139,11 @@ void callback(char *topic, byte *payload, unsigned int length) {
 
 void loop()
 {
+  relaySerial1ToUsb();
+  client.loop();
+}
+
+void relaySerialToUsb(){
     while (Serial.available())
     {
         int len = Serial.available();
@@ -137,6 +152,8 @@ void loop()
         int a = USBSerial.write((uint8_t*)buf1, len);
         Serial1.write((uint8_t*)buf1, len);
     }
+}
+void relaySerial1ToUsb(){
     while(Serial1.available())
     {
         int len = Serial1.available();
@@ -145,5 +162,4 @@ void loop()
         int a = USBSerial.write((uint8_t*)buf1, len);
         //Serial.write((uint8_t*)buf1, len);
     }
-    client.loop();
 }
