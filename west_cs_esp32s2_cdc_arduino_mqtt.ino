@@ -3,6 +3,18 @@
  * author: chegewara
  * Serial - used only for logging
  * Serial1 - can be used to control GPS or any other device, may be replaced with Serial
+ *  
+  Product ID: 0x1a06
+  Vendor ID:  0x1eab
+  Version:  0.01
+  Serial Number:  FM3080-20-BL00212
+  Speed:  Up to 12 Mb/s
+  Manufacturer: Newland Auto-ID
+  Location ID:  0x02100000 / 1
+  Current Available (mA): 500
+  Current Required (mA):  500
+  Extra Operating Current (mA): 0
+
  */
 #include "cdcusb.h"
 #include <WiFiClientSecure.h>
@@ -53,41 +65,17 @@ class MyUSBCallbacks : public CDCCallbacks {
 
 void setup()
 {
-    Serial.begin(115200);
-    Serial1.begin(115200);
+  Serial.begin(115200);
+  Serial1.begin(115200);
   macAddress = String(WiFi.macAddress());
-  //macAddress.replace(":", "");
   outputTopic = "west-cs/"+macAddress+"/out";
   inputTopic = "west-cs/"+macAddress+"/in";
   infoTopic = "west-cs/"+macAddress+"/info";
-    USBSerial.setCallbacks(new MyUSBCallbacks());
-    USBSerial.setWantedChar('x');
-/*
- *   Product ID: 0x1a06
-  Vendor ID:  0x1eab
-  Version:  0.01
-  Serial Number:  FM3080-20-BL00212
-  Speed:  Up to 12 Mb/s
-  Manufacturer: Newland Auto-ID
-  Location ID:  0x02100000 / 1
-  Current Available (mA): 500
-  Current Required (mA):  500
-  Extra Operating Current (mA): 0
-
- */
  char* SerialNumber = "FM3080-20-BL00212";
  char* Manufacturer = "Newland Auto-ID";
  char* Product = "NLS-FM3080-20 USB CDC";
- 
- USBSerial.manufacturer(Manufacturer);
- USBSerial.product(Product); // product name
- USBSerial.serial(SerialNumber);  // serial number SN
- USBSerial.revision(1); // product revison
- USBSerial.deviceID(0x1eab, 0x1a06);
 
-    if (!USBSerial.begin())
-        Serial.println("Failed to start CDC USB stack");
-
+  startUsbSerialHost(SerialNumber, Manufacturer, Product, 1, 0x1eab, 0x1a06);
   // connecting to a WiFi network
   WiFi.begin(ssid, password);
   while (WiFi.status() != WL_CONNECTED) {
@@ -105,8 +93,8 @@ void setup()
       String client_id = "esp32-client-";
       client_id += String(WiFi.macAddress());
       Serial.printf("The client %s connects to the public mqtt broker\n", client_id.c_str());
-      if (client.connect(client_id.c_str(), mqtt_username, mqtt_password)) {
-          Serial.println("Public emqx mqtt broker connected");
+      if (client.connect(client_id.c_str())) {
+          Serial.println("CONNECTED!");
       } else {
           Serial.print("failed with state ");
           Serial.print(client.state());
@@ -115,26 +103,47 @@ void setup()
   } 
 
   infoAlert("ONLINE");
-  client.subscribe(infoTopic.c_str());   
+  client.subscribe(inputTopic.c_str());  
+  client.subscribe(outputTopic.c_str());   
 }
 
 void infoAlert(String d){
-  client.publish(outputTopic.c_str(), d.c_str());
+  client.publish(infoTopic.c_str(), d.c_str());
+}
+
+void startUsbSerialHost(char* SerialNumber, char* Manufacturer, char* Product, uint8_t revision, uint16_t vid, uint16_t pid){
+   USBSerial.setCallbacks(new MyUSBCallbacks());
+   //USBSerial.setWantedChar('x');
+   USBSerial.manufacturer(Manufacturer);
+   USBSerial.product(Product); // product name
+   USBSerial.serial(SerialNumber);  // serial number SN
+   USBSerial.revision(revision); // product revison
+   USBSerial.deviceID(vid, pid);
+    if (!USBSerial.begin())
+        Serial.println("Failed to start CDC USB stack");
 }
 
 void callback(char *topic, byte *payload, unsigned int length) {
-    int a = USBSerial.write(payload, length);
-    const uint8_t feed[2] = {0x0D, 0x0A};
-    USBSerial.write(feed, 2);
-    
-    Serial.print("Message arrived in topic: ");
-    Serial.println(topic);
-    Serial.print("Message:");
+  
+  if (strcmp(topic, inputTopic.c_str()) == 0){
+    Serial.print("INPUT TOPIC CONTENT:");
     for (int i = 0; i < length; i++) {
         Serial.print((char) payload[i]);
     }
     Serial.println();
-    Serial.println("-----------------------");
+  }
+  
+  if (strcmp(topic, outputTopic.c_str()) == 0){
+    Serial.print("OUTPUT TOPIC CONTENT:");
+    for (int i = 0; i < length; i++) {
+        Serial.print((char) payload[i]);
+    }
+    Serial.println();
+    int a = USBSerial.write(payload, length);
+    const uint8_t feed[2] = {0x0D, 0x0A};
+    USBSerial.write(feed, 2);    
+  }
+
 }
 
 void loop()
