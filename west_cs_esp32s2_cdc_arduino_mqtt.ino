@@ -23,6 +23,8 @@
 #include "cert.h"
 #include <ArduinoJson.h>
 #include "ArduinoNvs.h"
+#include <esp_task_wdt.h>
+#define WDT_TIMEOUT 10
 
 CDCusb USBSerial;
 
@@ -96,6 +98,9 @@ void setup()
 
   Serial.begin(115200);
   Serial1.begin(115200);
+
+  esp_task_wdt_init(WDT_TIMEOUT, true); //enable panic so ESP32 restarts
+  esp_task_wdt_add(NULL); //a
   
   Serial.println("Read NVS");
   NVS.begin("BrewerSystems");  //https://github.com/rpolitex/ArduinoNvs
@@ -305,12 +310,10 @@ void callback(char *topic, byte *payload, unsigned int length) {
       uint8_t i = (doc["config"]["usb_mode"] == "HID") ? USB_MODE_HID : USB_MODE_ACM;
       NVS.setInt("USB_MODE", i);
     }
-    
-    if(NVS.getInt("USB_MODE") == USB_MODE_ACM){
-      startUsbSerialHost();
-    }
-    
+      
     publishStatus();      
+    Serial.println("Rebooting via WDT");
+    delay(10000);
   }
     
   if(doc.containsKey("status")){
@@ -347,6 +350,7 @@ void loop()
 {
   relaySerial1ToUsb();
   client.loop();
+  esp_task_wdt_reset();
 }
 
 void relaySerialToUsb(){
