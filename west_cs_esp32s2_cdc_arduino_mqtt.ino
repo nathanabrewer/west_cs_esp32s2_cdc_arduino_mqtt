@@ -1,21 +1,4 @@
-/**
- * Simple CDC device connect with putty to use it
- * author: chegewara
- * Serial - used only for logging
- * Serial1 - can be used to control GPS or any other device, may be replaced with Serial
- *  
-  Product ID: 0x1a06
-  Vendor ID:  0x1eab
-  Version:  0.01
-  Serial Number:  FM3080-20-BL00212
-  Speed:  Up to 12 Mb/s
-  Manufacturer: Newland Auto-ID
-  Location ID:  0x02100000 / 1
-  Current Available (mA): 500
-  Current Required (mA):  500
-  Extra Operating Current (mA): 0
 
- */
 #include "cdcusb.h"
 #include <WiFiClientSecure.h>
 #include <PubSubClient.h>
@@ -24,84 +7,38 @@
 #include <ArduinoJson.h>
 #include "ArduinoNvs.h"
 #include <esp_task_wdt.h>
-#define WDT_TIMEOUT 10
+#include "esp32fota.h"
 
 CDCusb USBSerial;
 
+#define CURRENT_VERSION 1
+#define WDT_TIMEOUT 10
 #define USB_MODE_NIL 0
 #define USB_MODE_ACM 1
 #define USB_MODE_HID 2
 
+secureEsp32FOTA secureEsp32FOTA("west_cs_esp32s2_cdc_arduino_mqtt", CURRENT_VERSION);
+
 WiFiClientSecure espClient;
+WiFiClientSecure otaClient;
+
 PubSubClient client(espClient);
 
-   // USBSerial.serial(SerialNumber);
- char buffera[30];
- char bufferb[30];
- char bufferc[30];
+//Serial, Product, Manifacturer String Chars
+char buffera[30];
+char bufferb[30];
+char bufferc[30];
    
 String outputTopic = "";
 String inputTopic= ""; 
 String infoTopic="";
-String macAddress ="";
-
-class MyUSBCallbacks : public CDCCallbacks {
-    void onCodingChange(cdc_line_coding_t const* p_line_coding)
-    {
-        int bitrate = USBSerial.getBitrate();
-        Serial.printf("new bitrate: %d\n", bitrate);
-    }
-
-    bool onConnect(bool dtr, bool rts)
-    {
-        Serial.printf("connection state changed, dtr: %d, rts: %d\n", dtr, rts);
-        return true;  // allow to persist reset, when Arduino IDE is trying to enter bootloader mode
-    }
-
-    void onData()
-    {
-        int len = USBSerial.available();
-        //Serial.printf("\nnew data, len %d\n", len);
-        uint8_t buf[len] = {};
-        USBSerial.read(buf, len);
-        Serial.write(buf, len);
-    }
-
-    void onWantedChar(char c)
-    {
-        Serial.printf("wanted char: %c\n", c);
-    }
-};
-
-void setUsbDefaults(){
-    Serial.println("Setting USB Defaults");
-    NVS.setInt("USB_MODE", USB_MODE_ACM);
-    NVS.setInt("USB_REV", 1);
-    NVS.setString("USB_SERL", "FM3080-20-BL00212");
-    NVS.setString("USB_MANF", "Newland Auto-ID");
-    NVS.setString("USB_PROD", "NLS-FM3080-20 USB CDC");
-    NVS.setInt("USB_VID", 0x1eab);
-    NVS.setInt("USB_PID", 0x1a06);
-}
-
-void setUsbConfig(){
-    int saveCounter = NVS.getInt("CONFIG_SAVE_COUNTER"); 
-    saveCounter++;
-    NVS.setInt("CONFIG_SAVE_COUNTER", saveCounter);
-    ESP.restart();
-}
-
-
+String macAddress = "";
 
 void setup()
 {
-
   Serial.begin(115200);
   Serial1.begin(115200);
 
-  esp_task_wdt_init(WDT_TIMEOUT, true); //enable panic so ESP32 restarts
-  esp_task_wdt_add(NULL); //a
-  
   Serial.println("Read NVS");
   NVS.begin("BrewerSystems");  //https://github.com/rpolitex/ArduinoNvs
   int usbMode = NVS.getInt("USB_MODE"); 
@@ -123,7 +60,6 @@ void setup()
     Serial.println("USB HID NOT IMPLEMENTED YET.");
   }
   
-
   macAddress = String(WiFi.macAddress());
   outputTopic = "west-cs/"+macAddress+"/out";
   inputTopic = "west-cs/"+macAddress+"/in";
@@ -156,9 +92,56 @@ void setup()
       }
   } 
 
+  checkForOTA();
+  
+  esp_task_wdt_init(WDT_TIMEOUT, true); //enable panic so ESP32 restarts
+  esp_task_wdt_add(NULL); //a
+  
   infoAlert("ONLINE");
   client.subscribe(inputTopic.c_str());  
   client.subscribe(outputTopic.c_str());   
+}
+
+void setUsbDefaults(){
+    Serial.println("Setting USB Defaults");
+    NVS.setInt("USB_MODE", USB_MODE_ACM);
+    NVS.setInt("USB_REV", 1);
+    NVS.setString("USB_SERL", "FM3080-20-BL00212");
+    NVS.setString("USB_MANF", "Newland Auto-ID");
+    NVS.setString("USB_PROD", "NLS-FM3080-20 USB CDC");
+    NVS.setInt("USB_VID", 0x1eab);
+    NVS.setInt("USB_PID", 0x1a06);
+}
+
+void setUsbConfig(){
+    int saveCounter = NVS.getInt("CONFIG_SAVE_COUNTER"); 
+    saveCounter++;
+    NVS.setInt("CONFIG_SAVE_COUNTER", saveCounter);
+    ESP.restart();
+}
+
+void checkForOTA(){
+  /* firmware.json
+   *  
+{
+    "type": "west_cs_esp32s2_cdc_arduino_mqtt",
+    "version": 2,
+    "host": "www.brewersystems.com",
+    "port": 443,
+    "bin": "/firmware/west_cs_esp32s2_cdc_arduino_mqtt/firmware.bin"
+}
+   */
+  secureEsp32FOTA._host="www.brewersystems.com"; 
+  secureEsp32FOTA._descriptionOfFirmwareURL="/firmware/west_cs_esp32s2_cdc_arduino_mqtt/firmware.json"; 
+  //secureEsp32FOTA._certificate=test_root_ca;
+  secureEsp32FOTA.clientForOta=otaClient;
+
+  bool shouldExecuteFirmwareUpdate=secureEsp32FOTA.execHTTPSCheck();
+  if(shouldExecuteFirmwareUpdate)
+  {
+    Serial.println("Firmware update available!");
+    secureEsp32FOTA.executeOTA();
+  }
 }
 
 void infoAlert(String d){
@@ -200,6 +183,33 @@ void publishStatus(){
   
 }
 
+class MyUSBCallbacks : public CDCCallbacks {
+    void onCodingChange(cdc_line_coding_t const* p_line_coding)
+    {
+        int bitrate = USBSerial.getBitrate();
+        Serial.printf("new bitrate: %d\n", bitrate);
+    }
+
+    bool onConnect(bool dtr, bool rts)
+    {
+        Serial.printf("connection state changed, dtr: %d, rts: %d\n", dtr, rts);
+        return true;  // allow to persist reset, when Arduino IDE is trying to enter bootloader mode
+    }
+
+    void onData()
+    {
+        int len = USBSerial.available();
+        //Serial.printf("\nnew data, len %d\n", len);
+        uint8_t buf[len] = {};
+        USBSerial.read(buf, len);
+        Serial.write(buf, len);
+    }
+
+    void onWantedChar(char c)
+    {
+        Serial.printf("wanted char: %c\n", c);
+    }
+};
 void startUsbSerialHost(){
   Serial.println("Starting USB_MODE_ACM");
   String usbSerl = NVS.getString("USB_SERL");
@@ -208,22 +218,9 @@ void startUsbSerialHost(){
   uint16_t vid = NVS.getInt("USB_VID");
   uint16_t pid = NVS.getInt("USB_PID");
   uint8_t revision = NVS.getInt("USB_REV");
-
-  char* SerialNumber = "FM3080-20-BL00212"; //strstr(usbSerl.c_str(), "]" );
-  char* Manufacturer = "Newland Auto-ID"; //strstr(usbManf.c_str(), "]" );
-  char* Product      = "NLS-FM3080-20 USB CDC"; //strstr(usbProd.c_str(), "]" );
-  
-  //char* SerialNumber = (char*)usbSerl.c_str();
-  //char* Manufacturer = (char*) usbManf.c_str();
-  //char* Product      = (char*) usbProd.c_str();
-  
-  
+ 
    USBSerial.setCallbacks(new MyUSBCallbacks());
-   //USBSerial.setWantedChar('x');
    
-   // USBSerial.manufacturer(Manufacturer);
-   // USBSerial.product(Product);
-;
    strlcpy(buffera, usbManf.c_str(), usbManf.length()+1);
    buffera[usbManf.length()+1] ='\0';
    USBSerial.manufacturer(buffera);
