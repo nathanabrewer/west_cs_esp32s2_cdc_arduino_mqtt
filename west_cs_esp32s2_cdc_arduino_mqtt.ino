@@ -1,5 +1,6 @@
 
 #include "cdcusb.h"
+#include "hidcomposite.h"
 #include <WiFiClientSecure.h>
 #include <PubSubClient.h>
 
@@ -10,6 +11,7 @@
 #include "esp32fota.h"
 
 CDCusb USBSerial;
+HIDcomposite keyboardDevice;
 
 #define CURRENT_VERSION 1
 #define WDT_TIMEOUT 10
@@ -17,6 +19,8 @@ CDCusb USBSerial;
 #define USB_MODE_ACM 1
 #define USB_MODE_HID 2
 
+enum sendCodeOrigin {SERL0, SERL1, MQTT};
+    
 secureEsp32FOTA secureEsp32FOTA("west_cs_esp32s2_cdc_arduino_mqtt", CURRENT_VERSION);
 
 WiFiClientSecure espClient;
@@ -34,6 +38,16 @@ String inputTopic= "";
 String infoTopic="";
 String macAddress = "";
 
+int usbMode;
+class MyHIDCallbacks: public HIDCallbacks{
+  void onData(uint8_t report_id, hid_report_type_t report_type, uint8_t const* buffer, uint16_t bufsize) {
+    Serial.printf("ID: %d, type: %d, size: %d\n", report_id, (int)report_type, bufsize);
+     for (size_t i = 0; i < bufsize; i++)
+    {
+        Serial.printf("%d\n", buffer[i]);
+    }
+  }
+};
 void setup()
 {
   Serial.begin(115200);
@@ -41,7 +55,7 @@ void setup()
 
   Serial.println("Read NVS");
   NVS.begin("BrewerSystems");  //https://github.com/rpolitex/ArduinoNvs
-  int usbMode = NVS.getInt("USB_MODE"); 
+  usbMode = NVS.getInt("USB_MODE"); 
 
   Serial.print("USB_MODE: ");
   Serial.println(usbMode);
@@ -56,8 +70,13 @@ void setup()
   if(usbMode == USB_MODE_ACM){
     startUsbSerialHost();
   }
+  
   if(usbMode == USB_MODE_HID){
-    Serial.println("USB HID NOT IMPLEMENTED YET.");
+    Serial.println("USB in HID Mode");
+    
+    keyboardDevice.setBaseEP(3);
+    keyboardDevice.begin();
+    keyboardDevice.setCallbacks(new MyHIDCallbacks());
   }
   
   macAddress = String(WiFi.macAddress());
@@ -79,6 +98,7 @@ void setup()
   client.setServer(mqtt_broker, mqtt_port);
   client.setCallback(callback);
   client.setBufferSize(1024);
+  
   while (!client.connected()) {
       String client_id = "esp32-client-";
       client_id += String(WiFi.macAddress());
@@ -92,7 +112,7 @@ void setup()
       }
   } 
 
-  checkForOTA();
+  //checkForOTA();
   
   esp_task_wdt_init(WDT_TIMEOUT, true); //enable panic so ESP32 restarts
   esp_task_wdt_add(NULL); //a
@@ -183,6 +203,7 @@ void publishStatus(){
   
 }
 
+
 class MyUSBCallbacks : public CDCCallbacks {
     void onCodingChange(cdc_line_coding_t const* p_line_coding)
     {
@@ -257,17 +278,26 @@ void callback(char *topic, byte *payload, unsigned int length) {
   }
   if (doc.containsKey("code")) {
     String code = String( doc["code"].as<char*>() );
+    sendOutput(code, MQTT);
+  }
 
-    Serial.println(code);
-    USBSerial.write((byte*) code.c_str(), code.length());
-    Serial.printf("USBSerial wrote %d bytes. (json['code'])");
-    Serial.println("");
-    
-    
-    const uint8_t feed[2] = {0x0D, 0x0A};
-    USBSerial.write(feed, 2);  
-    Serial.println("USBSerial wrote 2 bytes. (appending LF CR)");
-    //infoAlert how many bytes i wrote? 
+  //Mouse.move(40, 0);
+  if (doc.containsKey("mouse")) {
+    if(usbMode == USB_MODE_HID){
+      //keyboardDevice.sendString(doc["keyboard"]);
+    }else{
+      Serial.println("Error, not in USB HID Mode for Mouse Command");
+    }
+  }
+  if (doc.containsKey("keyboard")) {
+      if(usbMode == USB_MODE_HID){
+        String keydata = doc["keyboard"];
+        keyboardDevice.sendString(keydata);
+        Serial.print("Keyboard Send: ");
+        Serial.println(keydata);
+      }else{
+        Serial.println("Error, not in USB HID Mode for Keyboard Command");
+      }
   }
   
   if (doc.containsKey("config")) {
@@ -346,28 +376,62 @@ void callback(char *topic, byte *payload, unsigned int length) {
 void loop()
 {
   relaySerial1ToUsb();
+  relaySerialToUsb();
   client.loop();
   esp_task_wdt_reset();
 }
 
+void sendOutput(String &code, sendCodeOrigin origin){
+  Serial.println(code);
+  USBSerial.write((byte*) code.c_str(), code.length());
+  Serial.printf("USBSerial wrote %d bytes. (json['code'])");
+  Serial.println("");
+  const uint8_t feed[2] = {0x0D, 0x0A};
+  USBSerial.write(feed, 2);  
+  Serial.println("USBSerial wrote 2 bytes. (appending LF CR)");
+  //infoAlert how many bytes i wrote?   
+
+  StaticJsonDocument<256> doc;
+  JsonObject obj = doc.createNestedObject("sent");
+  obj["size"] = code.length();
+  obj["string"] = code;
+  if(origin == SERL0){
+    obj["origin"] = "SERIAL0";
+  }else if (origin == SERL1){
+    obj["origin"] = "SERIAL1";
+  }else if (origin == MQTT){
+    obj["origin"] = "MQTT";
+  }  
+  char buffer[256];
+  serializeJson(doc,buffer);  
+  client.publish(infoTopic.c_str(), buffer);  
+}
+
+void relayStream(Stream &port, String &content, sendCodeOrigin origin){
+  static char c;
+  static bool endofline;
+  while(port.available()) {
+     c = port.read();
+     if(c == 0x0D || c == 0x0A){
+       endofline = true;
+     }else{
+       content.concat(c);
+     }
+  }
+
+  if(endofline){
+      sendOutput(content, origin);
+      content = "";
+      endofline = false;
+  }
+     
+}
 void relaySerialToUsb(){
-    while (Serial.available())
-    {
-        int len = Serial.available();
-        char buf1[len];
-        Serial.read(buf1, len);
-        int a = USBSerial.write((uint8_t*)buf1, len);
-        Serial1.write((uint8_t*)buf1, len);
-    }
+    static String sString;
+    relayStream(Serial, sString, SERL0);    
 }
 
 void relaySerial1ToUsb(){
-    while(Serial1.available())
-    {
-        int len = Serial1.available();
-        char buf1[len];
-        Serial1.read(buf1, len);
-        int a = USBSerial.write((uint8_t*)buf1, len);
-        //Serial.write((uint8_t*)buf1, len);
-    }
+    static String sString1;
+    relayStream(Serial1, sString1, SERL1);    
 }
