@@ -48,8 +48,50 @@ class MyHIDCallbacks: public HIDCallbacks{
     }
   }
 };
+
+
+TaskHandle_t myTask1Handle = NULL;
+TaskHandle_t myTask2Handle = NULL;
+ 
+#define BLINK_GPIO1 GPIO_NUM_35
+#define BLINK_GPIO2 GPIO_NUM_36
+volatile bool redblinking = true;
+volatile bool greenblinking = false;
+volatile int greenspeed = 200;
+volatile int redspeed = 200;
+void task1(void *arg)
+{
+  gpio_pad_select_gpio(BLINK_GPIO1);
+  gpio_set_direction(BLINK_GPIO1, GPIO_MODE_OUTPUT);
+  while(1) {
+        if(redblinking){
+              gpio_set_level(BLINK_GPIO1, 1);
+              vTaskDelay(redspeed / portTICK_PERIOD_MS);
+              gpio_set_level(BLINK_GPIO1, 0);
+        }
+        vTaskDelay(redspeed / portTICK_PERIOD_MS);
+    }
+}
+void task2(void *arg)
+{
+  gpio_pad_select_gpio(BLINK_GPIO2);
+  gpio_set_direction(BLINK_GPIO2, GPIO_MODE_OUTPUT);
+  while(1) {
+        if(greenspeed){
+          gpio_set_level(BLINK_GPIO2, 0);
+          vTaskDelay(greenspeed / portTICK_PERIOD_MS);
+          gpio_set_level(BLINK_GPIO2, 1);
+        }
+      vTaskDelay(greenspeed / portTICK_PERIOD_MS);
+}
+}
+
 void setup()
 {
+
+  xTaskCreate(task1, "task1", 4096, NULL,10, &myTask1Handle);
+  xTaskCreate(task2, "task2", 4096, NULL, 9, &myTask2Handle);
+  
   Serial.begin(115200);
   Serial1.begin(115200);
 
@@ -83,7 +125,7 @@ void setup()
   outputTopic = "west-cs/"+macAddress+"/out";
   inputTopic = "west-cs/"+macAddress+"/in";
   infoTopic = "west-cs/"+macAddress+"/info";
-
+  greenspeed = 100;
   // connecting to a WiFi network
   WiFi.begin(ssid, password);
   while (WiFi.status() != WL_CONNECTED) {
@@ -112,7 +154,7 @@ void setup()
       }
   } 
 
-  //checkForOTA();
+  checkForOTA();
   
   esp_task_wdt_init(WDT_TIMEOUT, true); //enable panic so ESP32 restarts
   esp_task_wdt_add(NULL); //a
@@ -120,6 +162,9 @@ void setup()
   infoAlert("ONLINE");
   client.subscribe(inputTopic.c_str());  
   client.subscribe(outputTopic.c_str());   
+  redblinking = false;
+  greenblinking = true;
+  greenspeed = 800;
 }
 
 void setUsbDefaults(){
