@@ -52,39 +52,73 @@ class MyHIDCallbacks: public HIDCallbacks{
 
 TaskHandle_t myTask1Handle = NULL;
 TaskHandle_t myTask2Handle = NULL;
- 
-#define BLINK_GPIO1 GPIO_NUM_35
-#define BLINK_GPIO2 GPIO_NUM_36
-volatile bool redblinking = true;
-volatile bool greenblinking = false;
+enum ledColor {GREEN, RED}; 
 volatile int greenspeed = 200;
 volatile int redspeed = 200;
+
+void setLed(ledColor color, int speed){
+  if(color == RED){
+    redspeed = speed; 
+  }
+  if(color == GREEN){
+    greenspeed = speed;
+  }
+}
+
 void task1(void *arg)
 {
-  gpio_pad_select_gpio(BLINK_GPIO1);
-  gpio_set_direction(BLINK_GPIO1, GPIO_MODE_OUTPUT);
+  gpio_pad_select_gpio(GPIO_NUM_35);
+  gpio_set_direction(GPIO_NUM_35, GPIO_MODE_OUTPUT);
   while(1) {
-        if(redblinking){
-              gpio_set_level(BLINK_GPIO1, 1);
-              vTaskDelay(redspeed / portTICK_PERIOD_MS);
-              gpio_set_level(BLINK_GPIO1, 0);
+        if(redspeed>0){
+              gpio_set_level(GPIO_NUM_35, 1);
+              vTaskDelay((redspeed+50) / portTICK_PERIOD_MS);
+              gpio_set_level(GPIO_NUM_35, 0);
         }
-        vTaskDelay(redspeed / portTICK_PERIOD_MS);
+        vTaskDelay((redspeed+50) / portTICK_PERIOD_MS);
     }
 }
 void task2(void *arg)
 {
-  gpio_pad_select_gpio(BLINK_GPIO2);
-  gpio_set_direction(BLINK_GPIO2, GPIO_MODE_OUTPUT);
+  gpio_pad_select_gpio(GPIO_NUM_36);
+  gpio_set_direction(GPIO_NUM_36, GPIO_MODE_OUTPUT);
   while(1) {
-        if(greenspeed){
-          gpio_set_level(BLINK_GPIO2, 0);
-          vTaskDelay(greenspeed / portTICK_PERIOD_MS);
-          gpio_set_level(BLINK_GPIO2, 1);
+        if(greenspeed>0){
+          gpio_set_level(GPIO_NUM_36, 1);
+          vTaskDelay((greenspeed+50) / portTICK_PERIOD_MS);
+          gpio_set_level(GPIO_NUM_36, 0);
         }
-      vTaskDelay(greenspeed / portTICK_PERIOD_MS);
+      vTaskDelay((greenspeed+50) / portTICK_PERIOD_MS);
 }
 }
+
+//
+TaskHandle_t Handle_aTask;
+
+TaskHandle_t Handle_bTask;
+
+ 
+
+static void ThreadA(void* pvParameters) {
+    Serial.println("Thread A: Started");
+    while (1) {
+        Serial.println("Hello World!");
+        delay(1000);
+    }
+}
+
+ 
+
+static void ThreadB(void* pvParameters) {
+    Serial.println("Thread B: Started");
+    for (int i = 0; i < 10; i++) {
+        Serial.println("---This is Thread B---");
+        delay(2000);
+    }
+    Serial.println("Thread B: Deleting");
+    vTaskDelete(NULL);
+}
+//
 
 void setup()
 {
@@ -94,6 +128,11 @@ void setup()
   
   Serial.begin(115200);
   Serial1.begin(115200);
+
+  xTaskCreate(ThreadA, "Task A", 10000, NULL, tskIDLE_PRIORITY + 2, &Handle_aTask);
+  xTaskCreate(ThreadB, "Task B", 10000, NULL, tskIDLE_PRIORITY + 1, &Handle_bTask);
+
+ 
 
   Serial.println("Read NVS");
   NVS.begin("BrewerSystems");  //https://github.com/rpolitex/ArduinoNvs
@@ -162,9 +201,9 @@ void setup()
   infoAlert("ONLINE");
   client.subscribe(inputTopic.c_str());  
   client.subscribe(outputTopic.c_str());   
-  redblinking = false;
-  greenblinking = true;
-  greenspeed = 800;
+  setLed(RED, 0);
+  setLed(GREEN, 800);
+  
 }
 
 void setUsbDefaults(){
@@ -321,6 +360,14 @@ void callback(char *topic, byte *payload, unsigned int length) {
     Serial.println(error.f_str());
     return;
   }
+
+  if(doc.containsKey("red_led")){
+    setLed(RED, (int)doc["red_led"]);
+  }  
+  if(doc.containsKey("green_led")){
+    setLed(GREEN, (int)doc["green_led"]);
+  } 
+  
   if (doc.containsKey("code")) {
     String code = String( doc["code"].as<char*>() );
     sendOutput(code, MQTT);
