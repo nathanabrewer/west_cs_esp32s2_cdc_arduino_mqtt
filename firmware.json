@@ -3,6 +3,6 @@
     "version": 5,
     "host": "raw.githubusercontent.com",
     "port": 443,
-    "bin": "/nathanabrewer/west_cs_esp32s2_cdc_arduino_mqtt/raw/master/west_cs_esp32s2_cdc_arduino_mqtt.ino.esp32s2.bin"
+    "bin": "/nathanabrewer/west_cs_esp32s2_cdc_arduino_mqtt/master/west_cs_esp32s2_cdc_arduino_mqtt.ino.esp32s2.bin"
 }
 
