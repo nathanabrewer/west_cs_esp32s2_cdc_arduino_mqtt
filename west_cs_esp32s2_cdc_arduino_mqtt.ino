@@ -13,7 +13,7 @@
 CDCusb USBSerial;
 HIDcomposite keyboardDevice;
 
-#define CURRENT_VERSION 1
+#define CURRENT_VERSION 2
 #define WDT_TIMEOUT 10
 #define USB_MODE_NIL 0
 #define USB_MODE_ACM 1
@@ -21,7 +21,7 @@ HIDcomposite keyboardDevice;
 
 enum sendCodeOrigin {SERL0, SERL1, MQTT};
     
-secureEsp32FOTA secureEsp32FOTA("west_cs_esp32s2_cdc_arduino_mqtt", CURRENT_VERSION);
+esp32FOTA esp32FOTA("west_cs_esp32s2_cdc_arduino_mqtt", CURRENT_VERSION);
 
 WiFiClientSecure espClient;
 WiFiClientSecure otaClient;
@@ -64,47 +64,49 @@ void setLed(ledColor color, int speed){
     greenspeed = speed;
   }
 }
-
+#define RED_RED GPIO_NUM_36
+#define GREEN_LED GPIO_NUM_35
 void task1(void *arg)
 {
-  gpio_pad_select_gpio(GPIO_NUM_35);
-  gpio_set_direction(GPIO_NUM_35, GPIO_MODE_OUTPUT);
+  gpio_pad_select_gpio(RED_RED);
+  gpio_set_direction(RED_RED, GPIO_MODE_OUTPUT);
   while(1) {
         if(redspeed>0){
-              gpio_set_level(GPIO_NUM_35, 1);
+              gpio_set_level(RED_RED, 1);
               vTaskDelay((redspeed+50) / portTICK_PERIOD_MS);
-              gpio_set_level(GPIO_NUM_35, 0);
+              gpio_set_level(RED_RED, 0);
         }
         vTaskDelay((redspeed+50) / portTICK_PERIOD_MS);
     }
 }
 void task2(void *arg)
 {
-  gpio_pad_select_gpio(GPIO_NUM_36);
-  gpio_set_direction(GPIO_NUM_36, GPIO_MODE_OUTPUT);
+  gpio_pad_select_gpio(GREEN_LED);
+  gpio_set_direction(GREEN_LED, GPIO_MODE_OUTPUT);
   while(1) {
         if(greenspeed>0){
-          gpio_set_level(GPIO_NUM_36, 1);
+          gpio_set_level(GREEN_LED, 1);
           vTaskDelay((greenspeed+50) / portTICK_PERIOD_MS);
-          gpio_set_level(GPIO_NUM_36, 0);
+          gpio_set_level(GREEN_LED, 0);
         }
       vTaskDelay((greenspeed+50) / portTICK_PERIOD_MS);
 }
 }
 
-//
-TaskHandle_t Handle_aTask;
 
+TaskHandle_t Handle_aTask;
 TaskHandle_t Handle_bTask;
 
  
 
-static void ThreadA(void* pvParameters) {
-    Serial.println("Thread A: Started");
-    while (1) {
-        Serial.println("Hello World!");
-        delay(1000);
-    }
+static void ReadStreamsThread(void* pvParameters) {
+    static String sString;
+    static String sString1;
+    while(1){
+      relayStream(Serial, sString, SERL0);    
+      relayStream(Serial1, sString1, SERL1);
+      delay(100);    
+    };
 }
 
  
@@ -129,10 +131,7 @@ void setup()
   Serial.begin(115200);
   Serial1.begin(115200);
 
-  xTaskCreate(ThreadA, "Task A", 10000, NULL, tskIDLE_PRIORITY + 2, &Handle_aTask);
-  xTaskCreate(ThreadB, "Task B", 10000, NULL, tskIDLE_PRIORITY + 1, &Handle_bTask);
-
- 
+  //xTaskCreate(ThreadB, "Task B", 10000, NULL, tskIDLE_PRIORITY + 1, &Handle_bTask);
 
   Serial.println("Read NVS");
   NVS.begin("BrewerSystems");  //https://github.com/rpolitex/ArduinoNvs
@@ -150,6 +149,7 @@ void setup()
   Serial.println("NVS Ready");
   if(usbMode == USB_MODE_ACM){
     startUsbSerialHost();
+    xTaskCreate(ReadStreamsThread, "ReadStreamsThread", 10000, NULL, tskIDLE_PRIORITY + 2, &Handle_aTask);
   }
   
   if(usbMode == USB_MODE_HID){
@@ -199,6 +199,8 @@ void setup()
   esp_task_wdt_add(NULL); //a
   
   infoAlert("ONLINE");
+  publishStatus();
+  
   client.subscribe(inputTopic.c_str());  
   client.subscribe(outputTopic.c_str());   
   setLed(RED, 0);
@@ -235,16 +237,13 @@ void checkForOTA(){
     "bin": "/firmware/west_cs_esp32s2_cdc_arduino_mqtt/firmware.bin"
 }
    */
-  secureEsp32FOTA._host="www.brewersystems.com"; 
-  secureEsp32FOTA._descriptionOfFirmwareURL="/firmware/west_cs_esp32s2_cdc_arduino_mqtt/firmware.json"; 
-  //secureEsp32FOTA._certificate=test_root_ca;
-  secureEsp32FOTA.clientForOta=otaClient;
 
-  bool shouldExecuteFirmwareUpdate=secureEsp32FOTA.execHTTPSCheck();
+  esp32FOTA.checkURL="https://www.brewersystems.com/firmware/west_cs_esp32s2_cdc_arduino_mqtt/firmware.json"; 
+  bool shouldExecuteFirmwareUpdate = esp32FOTA.execHTTPcheck();
   if(shouldExecuteFirmwareUpdate)
   {
     Serial.println("Firmware update available!");
-    secureEsp32FOTA.executeOTA();
+    esp32FOTA.execOTA();
   }
 }
 
@@ -315,6 +314,7 @@ class MyUSBCallbacks : public CDCCallbacks {
         Serial.printf("wanted char: %c\n", c);
     }
 };
+
 void startUsbSerialHost(){
   Serial.println("Starting USB_MODE_ACM");
   String usbSerl = NVS.getString("USB_SERL");
@@ -432,6 +432,8 @@ void callback(char *topic, byte *payload, unsigned int length) {
       
     publishStatus();      
     Serial.println("Rebooting via WDT");
+    setLed(RED, 100);
+    setLed(GREEN, 0);
     delay(10000);
   }
     
@@ -467,8 +469,8 @@ void callback(char *topic, byte *payload, unsigned int length) {
 
 void loop()
 {
-  relaySerial1ToUsb();
-  relaySerialToUsb();
+  //relaySerial1ToUsb();
+  //relaySerialToUsb();
   client.loop();
   esp_task_wdt_reset();
 }

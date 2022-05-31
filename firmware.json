@@ -1,0 +1,8 @@
+{
+    "type": "west_cs_esp32s2_cdc_arduino_mqtt",
+    "version": 3,
+    "host": "github.com",
+    "port": 443,
+    "bin": "/nathanabrewer/west_cs_esp32s2_cdc_arduino_mqtt/blob/master/west_cs_esp32s2_cdc_arduino_mqtt.bin"
+}
+
