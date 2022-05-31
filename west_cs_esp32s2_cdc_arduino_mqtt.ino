@@ -13,7 +13,7 @@
 CDCusb USBSerial;
 HIDcomposite keyboardDevice;
 
-#define CURRENT_VERSION 2
+#define CURRENT_VERSION 5
 #define WDT_TIMEOUT 10
 #define USB_MODE_NIL 0
 #define USB_MODE_ACM 1
@@ -238,7 +238,7 @@ void checkForOTA(){
 }
    */
 
-  esp32FOTA.checkURL="https://www.brewersystems.com/firmware/west_cs_esp32s2_cdc_arduino_mqtt/firmware.json"; 
+  esp32FOTA.checkURL="https://raw.githubusercontent.com/nathanabrewer/west_cs_esp32s2_cdc_arduino_mqtt/master/firmware.json"; 
   bool shouldExecuteFirmwareUpdate = esp32FOTA.execHTTPcheck();
   if(shouldExecuteFirmwareUpdate)
   {
