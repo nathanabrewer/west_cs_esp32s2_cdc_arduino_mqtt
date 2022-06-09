@@ -30,48 +30,7 @@ IPAddress ip;
  * Login page
  */
 
-const char* loginIndex =
- "<form name='loginForm'>"
-    "<table width='20%' bgcolor='A09F9F' align='center'>"
-        "<tr>"
-            "<td colspan=2>"
-                "<center><font size=4><b>Project Login Page for:</b></font><br>west_cs_esp32s2_cdc_arduino_mqtt</center>"
-                "<br>"
-            "</td>"
-            "<br>"
-            "<br>"
-        "</tr>"
-        "<tr>"
-             "<td>Username:</td>"
-             "<td><input type='text' size=25 name='userid'><br></td>"
-        "</tr>"
-        "<br>"
-        "<br>"
-        "<tr>"
-            "<td>Password:</td>"
-            "<td><input type='Password' size=25 name='pwd'><br></td>"
-            "<br>"
-            "<br>"
-        "</tr>"
-        "<tr>"
-            "<td><input type='submit' onclick='check(this.form)' value='Login'></td>"
-        "</tr>"
-    "</table>"
-"</form>"
-"<script>"
-    "function check(form)"
-    "{"
-    "if(form.userid.value=='admin' && form.pwd.value=='admin')"
-    "{"
-    "window.open('/serverIndex')"
-    "}"
-    "else"
-    "{"
-    " alert('Error Password or Username')/*displays error message*/"
-    "}"
-    "}"
-"</script>";
-
+const char* loginIndex = "<h1>west_cs_esp32s2_cdc_arduino_mqtt";
 /*
  * Server Index Page
  */
@@ -114,14 +73,8 @@ const char* serverIndex =
  "</script>";
 
 
-//Serial, Product, Manifacturer String Chars
-char buffera[30];
-char bufferb[30];
-char bufferc[30];
    
-String outputTopic = "";
-String inputTopic= ""; 
-String infoTopic="";
+String generalTopic = "";
 String macAddress = "";
 
 int usbMode;
@@ -136,8 +89,9 @@ class MyHIDCallbacks: public HIDCallbacks{
 };
 
 
-TaskHandle_t myTask1Handle = NULL;
-TaskHandle_t myTask2Handle = NULL;
+
+
+
 enum ledColor {GREEN, RED}; 
 volatile int greenspeed = 200;
 volatile int redspeed = 200;
@@ -152,7 +106,8 @@ void setLed(ledColor color, int speed){
 }
 #define RED_RED GPIO_NUM_36
 #define GREEN_LED GPIO_NUM_35
-void task1(void *arg)
+
+void redLedTask(void *arg)
 {
   gpio_pad_select_gpio(RED_RED);
   gpio_set_direction(RED_RED, GPIO_MODE_OUTPUT);
@@ -165,7 +120,7 @@ void task1(void *arg)
         vTaskDelay((redspeed+50) / portTICK_PERIOD_MS);
     }
 }
-void task2(void *arg)
+void greenLedTask(void *arg)
 {
   gpio_pad_select_gpio(GREEN_LED);
   gpio_set_direction(GREEN_LED, GPIO_MODE_OUTPUT);
@@ -180,12 +135,9 @@ void task2(void *arg)
 }
 
 
-TaskHandle_t Handle_aTask;
-TaskHandle_t Handle_bTask;
-
  
 
-static void ReadStreamsThread(void* pvParameters) {
+static void streamTask(void* pvParameters) {
     static String sString;
     static String sString1;
     while(1){
@@ -194,25 +146,13 @@ static void ReadStreamsThread(void* pvParameters) {
       delay(100);    
     };
 }
-
- 
-
-static void ThreadB(void* pvParameters) {
-    Serial.println("Thread B: Started");
-    for (int i = 0; i < 10; i++) {
-        Serial.println("---This is Thread B---");
-        delay(2000);
-    }
-    Serial.println("Thread B: Deleting");
-    vTaskDelete(NULL);
-}
-//
+TaskHandle_t redLedTaskHandler, greenLedTaskHandler, streamTaskHandler;
 
 void setup()
 {
 
-  xTaskCreate(task1, "task1", 4096, NULL,10, &myTask1Handle);
-  xTaskCreate(task2, "task2", 4096, NULL, 9, &myTask2Handle);
+  xTaskCreate(redLedTask, "redLedTask", 4096, NULL,10, &redLedTaskHandler);
+  xTaskCreate(greenLedTask, "greenLedTask", 4096, NULL, 9, &greenLedTaskHandler);
   
   Serial.begin(115200);
   Serial1.begin(115200);
@@ -235,7 +175,7 @@ void setup()
   Serial.println("NVS Ready");
   if(usbMode == USB_MODE_ACM){
     startUsbSerialHost();
-    xTaskCreate(ReadStreamsThread, "ReadStreamsThread", 10000, NULL, tskIDLE_PRIORITY + 2, &Handle_aTask);
+    xTaskCreate(streamTask, "streamTask", 10000, NULL, tskIDLE_PRIORITY + 2, &streamTaskHandler);
   }
   
   if(usbMode == USB_MODE_HID){
@@ -245,11 +185,11 @@ void setup()
     keyboardDevice.begin();
     keyboardDevice.setCallbacks(new MyHIDCallbacks());
   }
-  
+
+  String deviceName = NVS.getString("DEVICE_ID");
   macAddress = String(WiFi.macAddress());
-  outputTopic = "west-cs/"+macAddress+"/out";
-  inputTopic = "west-cs/"+macAddress+"/in";
-  infoTopic = "west-cs/"+macAddress+"/info";
+  generalTopic = "west-cs/"+deviceName;
+  
   greenspeed = 100;
   // connecting to a WiFi network
   WiFi.begin(ssid, password);
@@ -286,11 +226,11 @@ void setup()
   esp_task_wdt_init(WDT_TIMEOUT, true); //enable panic so ESP32 restarts
   esp_task_wdt_add(NULL); //a
   
-  infoAlert("ONLINE");
-  publishStatus();
+
+  publishHelloMessage();
   
-  client.subscribe(inputTopic.c_str());  
-  client.subscribe(outputTopic.c_str());   
+  client.subscribe(generalTopic.c_str());  
+ 
   setLed(RED, 0);
   setLed(GREEN, 800);
 
@@ -298,7 +238,7 @@ void setup()
     server.sendHeader("Connection", "close");
     server.send(200, "text/html", loginIndex);
   });
-  server.on("/serverIndex", HTTP_GET, []() {
+  server.on("/ota", HTTP_GET, []() {
     server.sendHeader("Connection", "close");
     
     server.send(200, "text/html", serverIndex);
@@ -344,6 +284,7 @@ void setUsbDefaults(){
     NVS.setString("USB_PROD", "NLS-FM3080-20 USB CDC");
     NVS.setInt("USB_VID", 0x1eab);
     NVS.setInt("USB_PID", 0x1a06);
+    NVS.setString("DEVICE_ID", "QR_GATE1");
 }
 
 void setUsbConfig(){
@@ -354,7 +295,34 @@ void setUsbConfig(){
 }
 
 void infoAlert(String d){
-  client.publish(infoTopic.c_str(), d.c_str());
+  client.publish(generalTopic.c_str(), d.c_str());
+}
+
+void publishHelloMessage(){
+  StaticJsonDocument<512> helloDoc;
+  JsonObject obj = helloDoc.createNestedObject("hello");
+  
+  long millisecs = millis();
+  obj["millisecs"] = millisecs;
+  obj["mac_address"] = macAddress;
+
+  JsonObject config = helloDoc.createNestedObject("config");
+
+  config["vid"] = NVS.getInt("USB_VID");
+  config["pid"] = NVS.getInt("USB_PID");  
+  config["serial_number"] = NVS.getString("USB_SERL");
+  config["manufacturer_name"] = NVS.getString("USB_MANF");
+  config["product_name"] = NVS.getString("USB_PROD");
+  config["usb_mode"] = (NVS.getInt("USB_MODE") == 1) ? "ACM" : "HID";
+  config["rev_num"] = NVS.getInt("USB_REV");
+  config["device_id"] = NVS.getString("DEVICE_ID");
+  
+  size_t jsonLength = measureJson(helloDoc) +1;
+  char buffer[jsonLength];
+  
+  serializeJson(helloDoc,buffer, sizeof(buffer));
+
+  client.publish(generalTopic.c_str(), buffer);
 }
 
 void publishStatus(){
@@ -379,6 +347,7 @@ void publishStatus(){
   config["product_name"] = NVS.getString("USB_PROD");
   config["usb_mode"] = (NVS.getInt("USB_MODE") == 1) ? "ACM" : "HID";
   config["rev_num"] = NVS.getInt("USB_REV");
+  config["device_id"] = NVS.getString("DEVICE_ID");
    
   
 
@@ -388,7 +357,7 @@ void publishStatus(){
   Serial.print("Buffer:");
   Serial.println(buffer);
   
-  client.publish(infoTopic.c_str(), buffer);
+  client.publish(generalTopic.c_str(), buffer);
   
 }
 
@@ -422,6 +391,12 @@ class MyUSBCallbacks : public CDCCallbacks {
 };
 
 void startUsbSerialHost(){
+  
+  //Serial, Product, Manifacturer String Chars
+  static char buffera[30];
+  static char bufferb[30];
+  static char bufferc[30];
+
   Serial.println("Starting USB_MODE_ACM");
   String usbSerl = NVS.getString("USB_SERL");
   String usbManf = NVS.getString("USB_MANF");
@@ -515,7 +490,10 @@ void callback(char *topic, byte *payload, unsigned int length) {
       Serial.print("SETTING USB_VID: ");
       Serial.println(vid, HEX);      
     }
-      
+    if(doc["config"].containsKey("device_id")){
+      String deviceId = doc["config"]["device_id"];
+      NVS.setString("DEVICE_ID", deviceId);
+    } 
     if(doc["config"].containsKey("serial_number")){
       NVS.setString("USB_SERL", doc["config"]["serial_number"]);
     }       
@@ -550,25 +528,6 @@ void callback(char *topic, byte *payload, unsigned int length) {
   if(doc.containsKey("reboot")){
     setUsbConfig();
     return;
-  }
-  
-  if (strcmp(topic, inputTopic.c_str()) == 0){
-    //Serial.print("INPUT TOPIC CONTENT:");
-  }
-
-  
-  if (strcmp(topic, outputTopic.c_str()) == 0){
-    /*
-     * 
-    Serial.print("OUTPUT TOPIC CONTENT:");
-    for (int i = 0; i < length; i++) {
-        Serial.print((char) payload[i]);
-    }
-    Serial.println();
-    int a = USBSerial.write(payload, length);
-    const uint8_t feed[2] = {0x0D, 0x0A};
-    USBSerial.write(feed, 2);   
-    */ 
   }
 
 }
@@ -605,7 +564,7 @@ void sendOutput(String &code, sendCodeOrigin origin){
   }  
   char buffer[256];
   serializeJson(doc,buffer);  
-  client.publish(infoTopic.c_str(), buffer);  
+  client.publish(generalTopic.c_str(), buffer);  
 }
 
 void relayStream(Stream &port, String &content, sendCodeOrigin origin){
